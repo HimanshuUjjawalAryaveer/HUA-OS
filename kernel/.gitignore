@@ -1,8 +1,8 @@
+# Generated build metadata
 /compile_commands.json
 /.cache
 /.deps-obtained
-/freestanding-c-hdrs
-/freestanding-lgrt
-/limine-protocol
+
+# Kernel build output
 /bin
 /obj

@@ -4,58 +4,124 @@
 # Delete the target of a failed recipe.
 .DELETE_ON_ERROR:
 
-# Default user QEMU flags. These are appended to the QEMU command calls.
+# Default target.
+.DEFAULT_GOAL := all
+
+# ---------------------------------------------------------------------------
+# QEMU configuration
+# ---------------------------------------------------------------------------
+
 QEMUFLAGS := -m 2G
 QEMU_MACHINE := -M q35
 QEMU_CPU :=
-# Uncomment this line and comment out/remove the xHCI/USB keyboard/mouse
-# block below if the kernel does not support xHCI/USB and wants legacy
-# PS/2 keyboard and mouse instead.
-#QEMU_DEVICES :=
-QEMU_DEVICES := \
-    -device qemu-xhci \
-    -device usb-kbd \
-    -device usb-mouse
+QEMU_DEVICES :=
 
 override QEMUFLAGS := \
     $(QEMU_MACHINE) \
     $(QEMU_CPU) \
     $(QEMU_DEVICES) \
     $(QEMUFLAGS)
+
+# ---------------------------------------------------------------------------
+# Project paths
+# ---------------------------------------------------------------------------
+
+BUILD_DIR := build
+ISO_ROOT := $(BUILD_DIR)/iso_root
+
+IMAGE_NAME := $(BUILD_DIR)/hua
+
+LIMINE_DIR := third_party/limine/limine-binary
+OVMF_DIR := third_party/ovmf/edk2-ovmf-bins
+
+LIMINE_CONFIG := boot/limine/limine.conf
+OVMF_CODE := $(OVMF_DIR)/ovmf-code-x86_64.fd
+
 override QEMU_UEFI_FW := \
-    -drive if=pflash,unit=0,format=raw,file=edk2-ovmf-bins/ovmf-code-x86_64.fd,readonly=on
+    -drive if=pflash,unit=0,format=raw,file=$(OVMF_CODE),readonly=on
 
-override IMAGE_NAME := template
+# ---------------------------------------------------------------------------
+# HDD image configuration
+# ---------------------------------------------------------------------------
 
-# User controllable size of the HDD image, in MiB.
+# User-controllable HDD image size in MiB.
 HDD_SIZE := 64
 
-# Internal HDD geometry that should not be changed by the user. Older mtools
-# require one; 64 heads of 32 sectors make a cylinder exactly 1 MiB in size.
+# Internal HDD geometry. Do not change unless you understand the layout.
+# 64 heads x 32 sectors makes each cylinder exactly 1 MiB.
 override HDD_HEADS := 64
 override HDD_SECTORS_PER_TRACK := 32
 override HDD_CYLINDER_SECTORS := $(shell echo $$(( $(HDD_HEADS) * $(HDD_SECTORS_PER_TRACK) )))
 
-# Internal HDD partition layout that should not be changed by the user. sgdisk
-# lays the partition out as GPT before converting the table to MBR, so the
-# first and last cylinders are left to the GPT structures.
+# Leave the first and last cylinders for partition-table structures.
 override HDD_PART_START := $(HDD_CYLINDER_SECTORS)
 override HDD_PART_SECTORS := $(shell echo $$(( ($(HDD_SIZE) - 2) * $(HDD_CYLINDER_SECTORS) )))
 override HDD_PART_END := $(shell echo $$(( $(HDD_PART_START) + $(HDD_PART_SECTORS) - 1 )))
 override HDD_PART_OFFSET := $(shell echo $$(( $(HDD_PART_START) * 512 )))
 
-# Toolchain for building the 'limine' executable for the host.
+# ---------------------------------------------------------------------------
+# Host toolchain for the Limine utility
+# ---------------------------------------------------------------------------
+
 HOST_CC := cc
 HOST_CFLAGS := -g -O2 -pipe
 HOST_CPPFLAGS :=
 HOST_LDFLAGS :=
 HOST_LIBS :=
 
+override VARSFILES := $(addprefix $(LIMINE_DIR)/,HOST_CC HOST_CFLAGS HOST_CPPFLAGS HOST_LDFLAGS HOST_LIBS)
+
+override CHANGED_VARSFILES := $(foreach f,$(VARSFILES),$(shell printf '%s\n' '$(subst ','\'',$($(notdir $(f))))' | cmp -s - $(f) 2>/dev/null || echo $(f)))
+
+.PHONY: FORCE
+FORCE:
+
+$(CHANGED_VARSFILES): FORCE
+
+$(VARSFILES): $(LIMINE_DIR)/limine.c
+	@printf '%s\n' '$(subst ','\'',$($(notdir $@)))' > $@
+
+# Rebuild the host utility if its source or build configuration changes.
+$(LIMINE_DIR)/limine: $(LIMINE_DIR)/limine.c $(VARSFILES)
+	rm -f $@
+	$(MAKE) -C $(LIMINE_DIR) \
+		CC="$(HOST_CC)" \
+		CFLAGS="$(HOST_CFLAGS)" \
+		CPPFLAGS="$(HOST_CPPFLAGS)" \
+		LDFLAGS="$(HOST_LDFLAGS)" \
+		LIBS="$(HOST_LIBS)"
+
+# ---------------------------------------------------------------------------
+# Kernel
+# ---------------------------------------------------------------------------
+
+kernel/.deps-obtained:
+	./kernel/get-deps
+
+.PHONY: kernel
+kernel: kernel/.deps-obtained
+	$(MAKE) -C kernel
+
+# ---------------------------------------------------------------------------
+# Build directory
+# ---------------------------------------------------------------------------
+
+$(BUILD_DIR):
+	mkdir -p "$@"
+
+# ---------------------------------------------------------------------------
+# Main targets
+# ---------------------------------------------------------------------------
+
 .PHONY: all
 all: $(IMAGE_NAME).iso
 
 .PHONY: all-hdd
 all-hdd: $(IMAGE_NAME).hdd
+
+# ---------------------------------------------------------------------------
+# Run targets
+# ---------------------------------------------------------------------------
 
 .PHONY: run
 run: $(IMAGE_NAME).iso
@@ -65,7 +131,7 @@ run: $(IMAGE_NAME).iso
 		$(QEMUFLAGS)
 
 .PHONY: run-uefi
-run-uefi: edk2-ovmf-bins $(IMAGE_NAME).iso
+run-uefi: $(OVMF_CODE) $(IMAGE_NAME).iso
 	qemu-system-x86_64 \
 		-cdrom $(IMAGE_NAME).iso \
 		$(QEMUFLAGS) \
@@ -78,95 +144,77 @@ run-hdd: $(IMAGE_NAME).hdd
 		$(QEMUFLAGS)
 
 .PHONY: run-hdd-uefi
-run-hdd-uefi: edk2-ovmf-bins $(IMAGE_NAME).hdd
+run-hdd-uefi: $(OVMF_CODE) $(IMAGE_NAME).hdd
 	qemu-system-x86_64 \
 		-hda $(IMAGE_NAME).hdd \
 		$(QEMUFLAGS) \
 		$(QEMU_UEFI_FW)
 
-.INTERMEDIATE: edk2-ovmf-bins.tar.gz
-edk2-ovmf-bins.tar.gz:
-	curl -fL -o $@ https://github.com/osdev0/edk2-ovmf-stable-bins/releases/latest/download/edk2-ovmf-bins.tar.gz
+# ---------------------------------------------------------------------------
+# ISO image
+# ---------------------------------------------------------------------------
 
-edk2-ovmf-bins: edk2-ovmf-bins.tar.gz
-	rm -rf edk2-ovmf-bins
-	gunzip < edk2-ovmf-bins.tar.gz | tar -xf -
-
-.INTERMEDIATE: limine-binary.tar.gz
-limine-binary.tar.gz:
-	curl -fL -o $@ https://github.com/Limine-Bootloader/Limine/releases/latest/download/limine-binary.tar.gz
-
-# Date the source by the tarball, not the release inside it, so that what
-# is made from it is remade whenever it is extracted. Not by the clock, as
-# some touch use a finer one than file writes, dating it after what follows.
-limine-binary/limine.c: limine-binary.tar.gz
-	rm -rf limine-binary
-	gunzip < limine-binary.tar.gz | tar -xf -
-	touch -r limine-binary.tar.gz $@
-
-# The utility depends on records of the variables it is built with, named
-# after them, which are compared here and remade when they differ. They are
-# made after extracting, which removes them.
-override VARSFILES := $(addprefix limine-binary/,HOST_CC HOST_CFLAGS HOST_CPPFLAGS HOST_LDFLAGS HOST_LIBS)
-override CHANGED_VARSFILES := $(foreach f,$(VARSFILES),$(shell printf '%s\n' '$(subst ','\'',$($(notdir $(f))))' | cmp -s - $(f) 2>/dev/null || echo $(f)))
-.PHONY: FORCE
-FORCE:
-$(CHANGED_VARSFILES): FORCE
-$(VARSFILES): limine-binary/limine.c
-	@printf '%s\n' '$(subst ','\'',$($(notdir $@)))' > $@
-
-# Remove the utility first, as its makefile does not track the toolchain.
-limine-binary/limine: limine-binary/limine.c $(VARSFILES)
-	rm -f $@
-	$(MAKE) -C limine-binary \
-		CC="$(HOST_CC)" \
-		CFLAGS="$(HOST_CFLAGS)" \
-		CPPFLAGS="$(HOST_CPPFLAGS)" \
-		LDFLAGS="$(HOST_LDFLAGS)" \
-		LIBS="$(HOST_LIBS)"
-
-kernel/.deps-obtained:
-	./kernel/get-deps
-
-.PHONY: kernel
-kernel: kernel/.deps-obtained
-	$(MAKE) -C kernel
-
-$(IMAGE_NAME).iso: limine-binary/limine kernel
-	rm -rf iso_root
-	mkdir -p iso_root/boot
-	cp kernel/bin/kernel iso_root/boot/
-	mkdir -p iso_root/boot/limine
-	cp limine.conf limine-binary/limine-bios.sys limine-binary/limine-bios-cd.bin limine-binary/limine-uefi-cd.bin iso_root/boot/limine/
-	mkdir -p iso_root/EFI/BOOT
-	cp limine-binary/BOOTX64.EFI iso_root/EFI/BOOT/
-	cp limine-binary/BOOTIA32.EFI iso_root/EFI/BOOT/
-	xorriso -as mkisofs -R -r -J -b boot/limine/limine-bios-cd.bin \
+$(IMAGE_NAME).iso: $(LIMINE_DIR)/limine kernel | $(BUILD_DIR)
+	rm -rf $(ISO_ROOT)
+	mkdir -p $(ISO_ROOT)/boot
+	cp kernel/bin/kernel $(ISO_ROOT)/boot/
+	cp kernel/assets/terminus.psf $(ISO_ROOT)/boot/
+	mkdir -p $(ISO_ROOT)/boot/limine
+	cp $(LIMINE_CONFIG) \
+		$(LIMINE_DIR)/limine-bios.sys \
+		$(LIMINE_DIR)/limine-bios-cd.bin \
+		$(LIMINE_DIR)/limine-uefi-cd.bin \
+		$(ISO_ROOT)/boot/limine/
+	mkdir -p $(ISO_ROOT)/EFI/BOOT
+	cp $(LIMINE_DIR)/BOOTX64.EFI $(ISO_ROOT)/EFI/BOOT/
+	cp $(LIMINE_DIR)/BOOTIA32.EFI $(ISO_ROOT)/EFI/BOOT/
+	xorriso -as mkisofs -R -r -J \
+		-b boot/limine/limine-bios-cd.bin \
 		-no-emul-boot -boot-load-size 4 -boot-info-table -hfsplus \
-		-apm-block-size 2048 --efi-boot boot/limine/limine-uefi-cd.bin \
+		-apm-block-size 2048 \
+		--efi-boot boot/limine/limine-uefi-cd.bin \
 		-efi-boot-part --efi-boot-image --protective-msdos-label \
-		iso_root -o $(IMAGE_NAME).iso
-	./limine-binary/limine bios-install $(IMAGE_NAME).iso
-	rm -rf iso_root
+		$(ISO_ROOT) -o $(IMAGE_NAME).iso
+	$(LIMINE_DIR)/limine bios-install $(IMAGE_NAME).iso
+	rm -rf $(ISO_ROOT)
 
-$(IMAGE_NAME).hdd: limine-binary/limine kernel
+# ---------------------------------------------------------------------------
+# HDD image
+# ---------------------------------------------------------------------------
+
+$(IMAGE_NAME).hdd: $(LIMINE_DIR)/limine kernel | $(BUILD_DIR)
 	rm -f $(IMAGE_NAME).hdd
 	dd if=/dev/null bs=1024k seek=$(HDD_SIZE) of=$(IMAGE_NAME).hdd
-	PATH=$$PATH:/usr/sbin:/sbin sgdisk $(IMAGE_NAME).hdd -n 1:$(HDD_PART_START):$(HDD_PART_END) -t 1:ef00 -m 1
-	./limine-binary/limine bios-install $(IMAGE_NAME).hdd
-	mformat -i $(IMAGE_NAME).hdd@@$(HDD_PART_OFFSET) -T $(HDD_PART_SECTORS) -h $(HDD_HEADS) -s $(HDD_SECTORS_PER_TRACK) ::
-	mmd -i $(IMAGE_NAME).hdd@@$(HDD_PART_OFFSET) ::/EFI ::/EFI/BOOT ::/boot ::/boot/limine
-	mcopy -i $(IMAGE_NAME).hdd@@$(HDD_PART_OFFSET) kernel/bin/kernel ::/boot
-	mcopy -i $(IMAGE_NAME).hdd@@$(HDD_PART_OFFSET) limine.conf limine-binary/limine-bios.sys ::/boot/limine
-	mcopy -i $(IMAGE_NAME).hdd@@$(HDD_PART_OFFSET) limine-binary/BOOTX64.EFI ::/EFI/BOOT
-	mcopy -i $(IMAGE_NAME).hdd@@$(HDD_PART_OFFSET) limine-binary/BOOTIA32.EFI ::/EFI/BOOT
+	PATH=$$PATH:/usr/sbin:/sbin sgdisk $(IMAGE_NAME).hdd \
+		-n 1:$(HDD_PART_START):$(HDD_PART_END) -t 1:ef00 -m 1
+	$(LIMINE_DIR)/limine bios-install $(IMAGE_NAME).hdd
+	mformat -i $(IMAGE_NAME).hdd@@$(HDD_PART_OFFSET) \
+		-T $(HDD_PART_SECTORS) \
+		-h $(HDD_HEADS) \
+		-s $(HDD_SECTORS_PER_TRACK) ::
+	mmd -i $(IMAGE_NAME).hdd@@$(HDD_PART_OFFSET) \
+		::/EFI ::/EFI/BOOT ::/boot ::/boot/limine
+	mcopy -i $(IMAGE_NAME).hdd@@$(HDD_PART_OFFSET) \
+		kernel/bin/kernel ::/boot
+	mcopy -i $(IMAGE_NAME).hdd@@$(HDD_PART_OFFSET) \
+		$(LIMINE_CONFIG) $(LIMINE_DIR)/limine-bios.sys ::/boot/limine
+	mcopy -i $(IMAGE_NAME).hdd@@$(HDD_PART_OFFSET) \
+		$(LIMINE_DIR)/BOOTX64.EFI ::/EFI/BOOT
+	mcopy -i $(IMAGE_NAME).hdd@@$(HDD_PART_OFFSET) \
+		$(LIMINE_DIR)/BOOTIA32.EFI ::/EFI/BOOT
+
+# ---------------------------------------------------------------------------
+# Cleanup
+# ---------------------------------------------------------------------------
 
 .PHONY: clean
 clean:
 	$(MAKE) -C kernel clean
-	rm -rf iso_root $(IMAGE_NAME).iso $(IMAGE_NAME).hdd
+	rm -rf $(ISO_ROOT) $(IMAGE_NAME).iso $(IMAGE_NAME).hdd
 
+# Dependencies are kept in third_party/. Do not delete or reset them here.
+# Preserve kernel/.deps-obtained so the next build does not rerun get-deps.
 .PHONY: distclean
 distclean: clean
-	$(MAKE) -C kernel distclean
-	rm -rf limine-binary limine-binary.tar.gz edk2-ovmf-bins edk2-ovmf-bins.tar.gz
+	rm -rf kernel/.cache kernel/compile_commands.json
+	rm -f third_party/*.tar.gz

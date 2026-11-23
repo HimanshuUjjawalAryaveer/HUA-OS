@@ -1,7 +1,38 @@
-/limine-binary
-/limine-binary.tar.gz
-/edk2-ovmf-bins
-/edk2-ovmf-bins.tar.gz
-/iso_root
+
+# ============================================================
+# Generated build output
+# ============================================================
+
+/build/
+/iso_root/
 *.iso
 *.hdd
+
+# ============================================================
+# Kernel build output
+# ============================================================
+
+# ============================================================
+# Automatically fetched dependencies
+# ============================================================
+
+/third_party/freestanding-c-hdrs/
+/third_party/freestanding-lgrt/
+/third_party/limine-protocol/
+
+# ============================================================
+# Limine host-generated files
+# ============================================================
+
+/third_party/limine/limine-binary/limine
+/third_party/limine/limine-binary/HOST_CC
+/third_party/limine/limine-binary/HOST_CFLAGS
+/third_party/limine/limine-binary/HOST_CPPFLAGS
+/third_party/limine/limine-binary/HOST_LDFLAGS
+/third_party/limine/limine-binary/HOST_LIBS
+
+# ============================================================
+# Downloaded dependency archives
+# ============================================================
+
+/third_party/*.tar.gz

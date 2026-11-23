@@ -34,13 +34,17 @@ SECTIONS
     . = ALIGN(CONSTANT(MAXPAGESIZE));
 
     .text : {
+        __text_start = .;
         *(.text .text.*)
+        . = ALIGN(CONSTANT(MAXPAGESIZE));
+        __text_end = .;
     } :text
 
     /* Move to the next memory page for .rodata */
     . = ALIGN(CONSTANT(MAXPAGESIZE));
 
     .rodata : {
+        __rodata_start = .;
         *(.rodata .rodata.*)
     } :rodata
 
@@ -48,12 +52,15 @@ SECTIONS
     /* linker command. */
     .note.gnu.build-id : {
         *(.note.gnu.build-id)
+        . = ALIGN(CONSTANT(MAXPAGESIZE));
+        __rodata_end = .;
     } :rodata
 
     /* Move to the next memory page for .data */
     . = ALIGN(CONSTANT(MAXPAGESIZE));
 
     .data : {
+        __data_start = .;
         *(.data .data.*)
     } :data
 
@@ -62,9 +69,14 @@ SECTIONS
     /* If you need, for example, .init_array and .fini_array, those should be placed */
     /* above this. */
     .bss : {
+        __bss_start = .;
         *(.bss .bss.*)
         *(COMMON)
+        . = ALIGN(CONSTANT(MAXPAGESIZE));
+        __bss_end = .;
     } :data
+
+    __data_end = __bss_start;
 
     /* Discard .note.* and .eh_frame* since they may cause issues on some hosts, */
     /* and the GOT, which nothing in the kernel needs but some linkers create. */

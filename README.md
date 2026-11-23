@@ -1,51 +1,86 @@
-# Limine C Template
+# HUA OS
 
-This repository will demonstrate how to set up a basic x86-64 kernel in C using Limine.
+HUA OS is an experimental, educational operating system for the
+x86_64 architecture. It is written primarily in C, with NASM
+assembly for architecture-specific operations.
 
-It is recommended to cross reference the contents of this repository with [the Limine Bare Bones](https://osdev.wiki/wiki/Limine_Bare_Bones) OSDev wiki page.
+The project explores operating-system design by studying established
+ideas from Linux, BSD, Windows, and other systems, then adapting
+them to HUA OS's requirements.
 
-## How to use this?
+HUA OS currently boots using UEFI, the Limine boot protocol, and
+QEMU. It is a work in progress and is not intended for everyday use.
 
-### Dependencies
+## Current features
 
-Any `make` command depends on GNU make (`gmake`) and is expected to be run using it. This usually means using `make` on most GNU/Linux distros, or `gmake` on other non-GNU systems.
+### Boot and terminal
+- x86_64 UEFI boot using Limine
+- Framebuffer-based text console
+- PSF bitmap font support
+- PS/2 keyboard input
+- Interactive kernel shell
 
-All `make all*` targets depend on a GNU-compatible C toolchain capable of generating x86-64 ELF objects. Usually `gcc/binutils` or `clang/llvm/lld` provided by any x86-64 UNIX like (including Linux) distribution will suffice.
+### Memory management
+- Physical memory manager (PMM)
+- Virtual memory manager (VMM)
+- Four-level x86_64 paging
+- Kernel heap allocator
+- Address-space management
+- Page permissions and NX support
+- User-memory validation and safe copy operations
 
-Building also requires `git`, used to fetch the kernel's dependencies (see `kernel/get-deps`), `curl`, used to download the Limine release and the EDK2 OVMF firmware images, and a C compiler for the host (`cc` by default, see the `HOST_CC` `make` variable), used to build the `limine` host utility.
+### Architecture and interrupts
+- GDT and IDT
+- x86_64 interrupt and exception handling
+- System-call entry and return support
+- ACPI support
+- HPET and TSC clock sources
+- Timer and interrupt infrastructure
 
-Additionally, building an ISO with `make all` requires `xorriso`, and building a HDD/USB image with `make all-hdd` requires `sgdisk` (usually from `gdisk` or `gptfdisk` packages) and `mtools`.
+### Processes and scheduling
+- Process and thread lifecycle management
+- Thread scheduling and run queues
+- Wait and sleep queues
+- Synchronization primitives
+- Independent process address spaces
+- Ring 3 user-mode execution
+- ELF64 loading
+- System-call interface
+- User-process exception handling and cleanup
 
-Assembly files with the `*.S` extension are built using the same toolchain as the C sources. Only `*.asm` files, of which the template ships none, require `nasm`. The `run` targets require `qemu`.
+### Testing
+- In-kernel subsystem self-tests
+- Memory-management tests
+- Scheduler and synchronization tests
+- Process and user-mode tests
+- ELF loader and system-call tests
+- Failure-injection and rollback tests
 
-### Toolchain selection
+## Development environment
 
-The `TOOLCHAIN` and `TOOLCHAIN_PREFIX` `make` variables can be used to set the toolchain. `TOOLCHAIN` can be set to `llvm` to use Clang/LLVM.
+The primary development environment is Ubuntu under WSL2.
 
-For example:
-```
-make TOOLCHAIN=llvm
-```
-or:
-```
-make TOOLCHAIN_PREFIX=x86_64-elf-
-```
+The project uses:
+- GCC and GNU Make
+- NASM
+- Git
+- xorriso
+- QEMU
+- Limine
+- EDK2 OVMF firmware
 
-The kernel is linked through the compiler driver, using its default linker for GCC and LLD for Clang. A different linker can be picked by adding a `-fuse-ld=` option to `LDFLAGS`.
+On Ubuntu, the basic development packages can be installed with:
 
-Link-time optimisation can be enabled by adding `-flto` to `CFLAGS`, for example:
-```
-make CFLAGS='-g -O2 -pipe -flto'
-```
+```bash
+sudo apt update
+sudo apt install build-essential git curl nasm xorriso qemu-system-x86
 
-### Makefile targets
+## Licensing
 
-Running `make all` will compile the kernel (from the `kernel/` directory) and then generate a bootable ISO image.
+HUA-authored code is licensed under the MIT License; see [LICENSE](LICENSE).
 
-Running `make all-hdd` will compile the kernel and then generate a raw image suitable to be flashed onto a USB stick or hard drive/SSD.
+The original Limine C Template license notice is preserved in
+[LICENSE-LIMINE-C-TEMPLATE](LICENSE-LIMINE-C-TEMPLATE).
 
-Running `make run` will build the kernel and a bootable ISO (equivalent to make all) and then run it using `qemu` (if installed).
-
-Running `make run-hdd` will build the kernel and a raw HDD image (equivalent to make all-hdd) and then run it using `qemu` (if installed).
-
-The `run-uefi` and `run-hdd-uefi` targets are equivalent to their non `-uefi` counterparts except that they boot `qemu` using a UEFI-compatible firmware.
+Third-party components remain subject to their respective licenses.
+See the relevant files under `third_party/`.

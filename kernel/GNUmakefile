@@ -108,8 +108,8 @@ override CFLAGS += \
 override CPPFLAGS := \
     -nostdinc \
     -I src \
-    -I limine-protocol/include \
-    -isystem freestanding-c-hdrs/include \
+    -I ../third_party/limine-protocol/include \
+    -isystem ../third_party/freestanding-c-hdrs/include \
     $(CPPFLAGS) \
     -MD \
     -MP
@@ -255,12 +255,25 @@ endif
 
 # Use "find" to glob all *.c, *.S, and *.asm files in the tree and obtain the
 # object and header dependency file names.
-override SRCFILES := $(shell find -L src freestanding-lgrt/src -type f 2>/dev/null | LC_ALL=C sort)
+# Discover project sources inside the kernel source tree.
+override SRCFILES := $(shell find -L src -type f 2>/dev/null | LC_ALL=C sort)
+
 override CFILES := $(filter %.c,$(SRCFILES))
 override ASFILES := $(filter %.S,$(SRCFILES))
 override NASMFILES := $(filter %.asm,$(SRCFILES))
-override OBJ := $(addprefix obj/,$(CFILES:.c=.c.o) $(ASFILES:.S=.S.o) $(NASMFILES:.asm=.asm.o))
-override HEADER_DEPS := $(addprefix obj/,$(CFILES:.c=.c.d) $(ASFILES:.S=.S.d) $(NASMFILES:.asm=.asm.d))
+
+# Build the external freestanding runtime into the kernel object directory.
+override FREESTANDING_LGRT_SRC := ../third_party/freestanding-lgrt/src/freestanding-lgrt.c
+override FREESTANDING_LGRT_OBJ := obj/third_party/freestanding-lgrt/src/freestanding-lgrt.c.o
+override FREESTANDING_LGRT_DEP := $(FREESTANDING_LGRT_OBJ:.o=.d)
+
+override OBJ := \
+    $(addprefix obj/,$(CFILES:.c=.c.o) $(ASFILES:.S=.S.o) $(NASMFILES:.asm=.asm.o)) \
+    $(FREESTANDING_LGRT_OBJ)
+
+override HEADER_DEPS := \
+    $(addprefix obj/,$(CFILES:.c=.c.d) $(ASFILES:.S=.S.d) $(NASMFILES:.asm=.asm.d)) \
+    $(FREESTANDING_LGRT_DEP)
 
 # Default target. This must come first, before header dependencies.
 .PHONY: all
@@ -293,10 +306,15 @@ bin/$(OUTPUT): GNUmakefile obj/CC obj/CFLAGS obj/LDFLAGS linker-scripts/x86_64.l
 
 # The compiler may emit calls to the memory functions and the compiler
 # runtime that LTO does not account for, so never build those with LTO.
-obj/src/memory.c.o obj/freestanding-lgrt/src/freestanding-lgrt.c.o: override CFLAGS += -fno-lto
+obj/src/lib/memory.c.o $(FREESTANDING_LGRT_OBJ): override CFLAGS += -fno-lto
 
 # Compilation rules for *.c files.
 obj/%.c.o: %.c GNUmakefile obj/CC obj/CFLAGS obj/CPPFLAGS
+	mkdir -p "$(dir $@)"
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
+
+# Compile the external freestanding runtime into the kernel object directory.
+$(FREESTANDING_LGRT_OBJ): $(FREESTANDING_LGRT_SRC) GNUmakefile obj/CC obj/CFLAGS obj/CPPFLAGS
 	mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
@@ -318,7 +336,7 @@ clean:
 # Remove everything built and generated including downloaded dependencies.
 .PHONY: distclean
 distclean: clean
-	rm -rf .deps-obtained .cache compile_commands.json freestanding-c-hdrs freestanding-lgrt limine-protocol
+	rm -rf .deps-obtained .cache compile_commands.json
 
 # Install the final built executable to its final on-root location. Not
 # install(1), which takes other arguments on illumos and Solaris.
